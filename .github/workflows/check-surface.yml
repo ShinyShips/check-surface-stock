@@ -1,0 +1,46 @@
+name: Check Surface Pro 10 Stock
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"  # Check every 5 minutes
+  workflow_dispatch:
+    inputs:
+      force_notify:
+        description: "Force a test alert (no status saved)"
+        required: false
+        default: "false"
+
+jobs:
+  check-stock:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write  # Needed to commit changes to status.json
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4
+
+      - name: Run stock check
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          FORCE_NOTIFY: ${{ github.event.inputs.force_notify }}
+        run: python check_stock.py
+
+      - name: Commit updated status
+        if: github.event.inputs.force_notify != 'true'
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add status.json
+          git commit -m "Update stock status" || echo "No changes to commit"
+          git push
