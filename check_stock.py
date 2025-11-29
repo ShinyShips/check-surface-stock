@@ -56,78 +56,131 @@ def get_current_status():
         # Wait a bit for the SKUs to load after clicking 5G
         time.sleep(3)
         
-        # Wait for specifications section to load
-        print("Waiting for specifications to load...")
-        wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, '[data-automation-test-id="configuratorV3-step-index-0-3"]'))
-        )
+        all_available_skus = []
+        all_out_of_stock_skus = []
         
-        # Get the page source and parse with BeautifulSoup
-        soup = BeautifulSoup(driver.page_source, "html.parser")
+        # Check both processor options
+        processor_buttons = [
+            ('configuratorV3-tile-button-IntelCoreUltra5Processor135U-0-0-0', 'Intel Core Ultra 5 (135U)'),
+            ('configuratorV3-tile-button-IntelCoreUltra7Processor165U-0-0-1', 'Intel Core Ultra 7 (165U)')
+        ]
         
-        # Find the specifications (RAM/Storage) container
-        specs_ul = soup.find("ul", attrs={"data-automation-test-id": "configuratorV3-step-index-0-3"})
-        if not specs_ul:
-            print("Specifications section not found.")
-            return None
-
-        # Find all SKU tiles (li elements with class "tile" but NOT "d-none" which means hidden)
-        all_tiles = specs_ul.find_all("li", class_="tile")
-        # Filter out hidden tiles (those with "d-none" class)
-        sku_tiles = [tile for tile in all_tiles if "d-none" not in tile.get("class", [])]
-        
-        print(f"Found {len(all_tiles)} total tiles, {len(sku_tiles)} visible")
-        
-        if not sku_tiles:
-            print("No visible SKU tiles found.")
-            return None
-
-        available_skus = []
-        out_of_stock_skus = []
-
-        for tile in sku_tiles:
-            # Extract RAM and storage info
-            tile_body = tile.find("div", class_="v3tile__tilebody")  # Fixed: double underscore
-            if not tile_body:
-                print(f"No tile body found in tile: {tile.get('id')}")
-                continue
+        for processor_selector, processor_name in processor_buttons:
+            print(f"Checking {processor_name}...")
+            
+            # Click the processor button
+            try:
+                processor_button = wait.until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, f'[data-automation-test-id="{processor_selector}"]'))
+                )
+                driver.execute_script("arguments[0].click();", processor_button)
                 
-            ram_elem = tile_body.find("p")
-            storage_elem = ram_elem.find_next_sibling("p") if ram_elem else None
+                # Wait for the page to update after clicking
+                time.sleep(3)
+            except Exception as e:
+                print(f"Could not click {processor_name}: {e}")
+                continue
             
-            ram = ram_elem.get_text(strip=True) if ram_elem else "Unknown RAM"
-            storage = storage_elem.get_text(strip=True) if storage_elem else "Unknown Storage"
+            # Wait for specifications section to be present
+            wait.until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, '[data-automation-test-id="configuratorV3-step-index-0-3"]'))
+            )
             
-            # Extract price from tilefooter
-            tilefooter = tile.find("div", class_="v3tile__tilefooter")  # Fixed: double underscore
-            price_elem = tilefooter.find("span") if tilefooter else None
-            price = price_elem.get_text(strip=True) if price_elem else "Unknown Price"
+            # Get the page source and parse with BeautifulSoup
+            soup = BeautifulSoup(driver.page_source, "html.parser")
             
-            # Check if out of stock
-            out_of_stock_badge = tile.find("span", class_="badge", string=lambda text: text and "out of stock" in text.lower())
+            # Find the specifications (RAM/Storage) container
+            specs_ul = soup.find("ul", attrs={"data-automation-test-id": "configuratorV3-step-index-0-3"})
+            if not specs_ul:
+                print(f"Specifications section not found for {processor_name}.")
+                continue
+
+            # Find all SKU tiles (li elements with class "tile" but NOT "d-none")
+            all_tiles = specs_ul.find_all("li", class_="tile")
+            # Filter: must not have "d-none" (hidden)
+            visible_tiles = [tile for tile in all_tiles 
+                            if "d-none" not in tile.get("class", [])]
             
-            # Check if button is disabled
-            button = tile.find("button", class_="tile__button")  # Fixed: double underscore
-            is_disabled = button and button.has_attr("disabled")
+            print(f"  Found {len(all_tiles)} total tiles, {len(visible_tiles)} visible")
             
-            sku_info = {
-                "ram": ram,
-                "storage": storage,
-                "price": price,
-                "processor": "Any (Ultra 5 or Ultra 7)",
-                "network": "5G"
-            }
+            # Further filter to only include tiles that match the current processor
+            # by checking if the button's data-m contains the processor name
+            sku_tiles = []
+            for tile in visible_tiles:
+                button = tile.find("button", class_="tile__button")
+                if button and button.has_attr("data-m"):
+                    button_data_str = button.get("data-m", "")
+                    # Check if this tile is for the currently selected processor
+                    if "Ultra 5" in processor_name and "Ultra 5" in button_data_str:
+                        sku_tiles.append(tile)
+                    elif "Ultra 7" in processor_name and "Ultra 7" in button_data_str:
+                        sku_tiles.append(tile)
             
-            if out_of_stock_badge or is_disabled:
-                out_of_stock_skus.append(sku_info)
-            else:
-                available_skus.append(sku_info)
+            print(f"  {len(sku_tiles)} tiles match {processor_name}")
+            
+            if not sku_tiles:
+                print(f"  No matching SKU tiles found for {processor_name}.")
+                continue
+
+            for tile in sku_tiles:
+                # Extract RAM and storage info
+                tile_body = tile.find("div", class_="v3tile__tilebody")
+                if not tile_body:
+                    continue
+                
+                # Get all <p> tags in the tile body
+                p_tags = tile_body.find_all("p")
+                
+                if len(p_tags) < 2:
+                    # Skip tiles that don't have enough info
+                    continue
+                
+                # Handle two different tile structures:
+                # 1. Tiles with 3 tags: [Processor Name, RAM, Storage]
+                # 2. Tiles with 2 tags: [RAM, Storage]
+                if len(p_tags) >= 3:
+                    # Structure: Processor, RAM, Storage (skip first tag which is processor)
+                    ram = p_tags[1].get_text(strip=True)
+                    storage = p_tags[2].get_text(strip=True)
+                else:
+                    # Structure: RAM, Storage
+                    ram = p_tags[0].get_text(strip=True)
+                    storage = p_tags[1].get_text(strip=True)
+                
+                # Validate we have proper RAM and Storage
+                if "RAM" not in ram.upper() or "SSD" not in storage.upper():
+                    continue
+                
+                # Extract price from tilefooter
+                tilefooter = tile.find("div", class_="v3tile__tilefooter")
+                price_elem = tilefooter.find("span") if tilefooter else None
+                price = price_elem.get_text(strip=True) if price_elem else "Unknown Price"
+                
+                # Check if out of stock
+                out_of_stock_badge = tile.find("span", class_="badge", string=lambda text: text and "out of stock" in text.lower())
+                
+                # Check if button is disabled
+                button = tile.find("button", class_="tile__button")
+                is_disabled = button and button.has_attr("disabled")
+                
+                sku_info = {
+                    "ram": ram,
+                    "storage": storage,
+                    "price": price,
+                    "processor": processor_name,
+                    "network": "5G"
+                }
+                
+                if out_of_stock_badge or is_disabled:
+                    all_out_of_stock_skus.append(sku_info)
+                else:
+                    all_available_skus.append(sku_info)
         
-        print(f"Found {len(available_skus)} available SKUs and {len(out_of_stock_skus)} out of stock SKUs")
+        print(f"Found {len(all_available_skus)} available SKUs and {len(all_out_of_stock_skus)} out of stock SKUs")
         
         return {
-            "available": available_skus,
-            "out_of_stock": out_of_stock_skus
+            "available": all_available_skus,
+            "out_of_stock": all_out_of_stock_skus
         }
     
     except Exception as e:
@@ -172,11 +225,11 @@ def send_discord_alert(available_skus, newly_available_skus):
     if newly_available_skus:
         description = "**🎉 Newly Available SKUs:**\n"
         for sku in newly_available_skus:
-            description += f"\n• {sku['ram']} / {sku['storage']} - {sku['price']}"
+            description += f"\n• **{sku['processor']}** - {sku['ram']} / {sku['storage']} - {sku['price']}"
     else:
         description = "**📦 Available SKUs:**\n"
         for sku in available_skus:
-            description += f"\n• {sku['ram']} / {sku['storage']} - {sku['price']}"
+            description += f"\n• **{sku['processor']}** - {sku['ram']} / {sku['storage']} - {sku['price']}"
     
     if not available_skus:
         description = f"All {network_type} configurations are currently out of stock."
@@ -216,11 +269,11 @@ def main():
     
     print(f"\nCurrent available SKUs: {len(current_available_skus)}")
     for sku in current_available_skus:
-        print(f"  • {sku['ram']} / {sku['storage']} - {sku['price']}")
+        print(f"  • {sku['processor']} - {sku['ram']} / {sku['storage']} - {sku['price']}")
     
     print(f"\nOut of stock SKUs: {len(current_status.get('out_of_stock', []))}")
     for sku in current_status.get('out_of_stock', []):
-        print(f"  • {sku['ram']} / {sku['storage']} - {sku['price']}")
+        print(f"  • {sku['processor']} - {sku['ram']} / {sku['storage']} - {sku['price']}")
 
     if force_notify:
         print("\nForce notify enabled — sending test alert.")
