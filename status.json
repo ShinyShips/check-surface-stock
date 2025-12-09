@@ -1,25 +1,3 @@
 {
-  "available_skus": [
-    {
-      "ram": "16GB RAM",
-      "storage": "256GB SSD",
-      "price": "$1,529.00",
-      "processor": "Intel Core Ultra 5 (135U)",
-      "network": "5G"
-    },
-    {
-      "ram": "16GB RAM",
-      "storage": "256GB SSD",
-      "price": "$1,699.00",
-      "processor": "Intel Core Ultra 7 (165U)",
-      "network": "5G"
-    },
-    {
-      "ram": "32GB RAM",
-      "storage": "512GB SSD",
-      "price": "$2,129.00",
-      "processor": "Intel Core Ultra 7 (165U)",
-      "network": "5G"
-    }
-  ]
+  "available_skus": []
 }
